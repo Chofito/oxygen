@@ -1,0 +1,155 @@
+# This file will automatically update with entries for new content after a build and reload.
+# Please read https://github.com/tModLoader/tModLoader/wiki/Localization to learn more about localization and these files.
+
+Configs: {
+	ClientConfig: {
+		DisplayName: Client Config
+
+		Headers: {
+			Dust: Dust Header
+			Projectiles: Projectiles Header
+			NPCThrottling: N P C Throttling Header
+			Gore: Gore Header
+			Sound: Sound Header
+			World: World Header
+			GCManagement: G C Management Header
+			Diagnostics: Diagnostics Header
+			Parallelism: Parallelism Header
+			Lighting: Lighting Header
+		}
+
+		DustUpdateThrottling: {
+			Label: Dust Update Throttling
+			Tooltip: Reduce update frequency for distant dust particles.
+		}
+
+		DustDensityPercent: {
+			Label: Dust Density (%)
+			Tooltip: Percentage of dust particles allowed to exist. Lower = fewer particles.
+		}
+
+		DustCullDistance: {
+			Label: Dust Cull Distance (tiles)
+			Tooltip: Dust beyond this distance from the player is culled.
+		}
+
+		HideAllyProjectilesEnabled: {
+			Label: Hide Ally Projectiles
+			Tooltip: Hides or dims projectiles from other players to reduce rendering load.
+		}
+
+		HideAllyProjectilesBossOnly: {
+			Label: Only During Boss Fights
+			Tooltip: When enabled, ally projectiles are only hidden while a boss is active.
+		}
+
+		ProjectileOpacityPercent: {
+			Label: Projectile Opacity (%)
+			Tooltip: 0 = fully hidden. Values above 0 reduce opacity instead of hiding completely.
+		}
+
+		NPCThrottlingEnabled: {
+			Label: NPC AI Throttling
+			Tooltip: Reduces AI update frequency for distant non-boss, non-town NPCs.
+		}
+
+		NPCThrottleStartDistance: {
+			Label: NPC Throttle Start Distance (tiles)
+			Tooltip: NPCs beyond this distance from the player begin to be throttled.
+		}
+
+		GoreCullingEnabled: {
+			Label: Gore Culling
+			Tooltip: Hides gore outside the viewport and removes old off-screen gore.
+		}
+
+		GoreTimeoutTicks: {
+			Label: Gore Timeout (ticks)
+			Tooltip: Off-screen gore older than this many ticks is removed. 60 ticks = 1 second.
+		}
+
+		SoundThrottlingEnabled: {
+			Label: Sound Throttling
+			Tooltip: Prevents the same sound from playing too many times in a short window.
+		}
+
+		MaxSoundInstancesPerWindow: {
+			Label: Max Sound Instances Per Window
+			Tooltip: Maximum times the same sound can play within the time window.
+		}
+
+		SoundWindowTicks: {
+			Label: Sound Window (ticks)
+			Tooltip: Time window in ticks for sound throttling. 60 ticks = 1 second.
+		}
+
+		WorldUpdateThrottlingEnabled: {
+			Label: World Update Throttling
+			Tooltip: Reduces ambient world update frequency (grass/corruption spread) during boss fights.
+		}
+
+		GCManagementEnabled: {
+			Label: GC Management
+			Tooltip: Attempts to reduce garbage collection pauses during boss fights. Aggressive - enable with caution.
+		}
+
+		ShowDiagnosticsOverlay: {
+			Label: Show Diagnostics Overlay
+			Tooltip: Displays an overlay with FPS, active entity counts, and active features.
+		}
+
+		DiagnosticsPosition: {
+			Label: Overlay Position
+			Tooltip: Corner of the screen where the diagnostics overlay appears.
+		}
+
+		DustParallelismEnabled: {
+			Tooltip: Runs the dust update loop across multiple CPU cores using IL patching. Auto-disables on any error. Requires at least 2 logical cores. Most impactful during fights with heavy particle effects.
+			Label: Dust Update Parallelism
+		}
+
+		ProjectileParallelismEnabled: {
+			Tooltip: Runs visual-only projectiles (damage=0, non-hostile) across multiple CPU cores. Targets Infernum/Calamity aura and burst projectiles around boss segments. Damage-dealing and hostile projectiles always run sequentially (safe). Auto-disables on any error. Requires at least 2 logical cores.
+			Label: Projectile Update Parallelism
+		}
+
+		TownNPCThrottlingEnabled: {
+			Tooltip: Reduces AI update frequency for off-screen town NPCs (shopkeepers, etc.). Helps significantly in large bases with many NPCs. Off-screen town NPCs run AI at ~20 Hz instead of 60 Hz. Shop/dialogue interactions are unaffected - NPCs near you always run full AI.
+			Label: Town NPC AI Throttling
+		}
+
+		ProjectileAIThrottlingEnabled: {
+			Tooltip: Skips AI every other tick for visual-only projectiles (damage=0) that are off-screen. Targets Infernum/Calamity boss aura projectiles that are purely decorative. Position still updates via velocity - no visible movement errors.
+			Label: Projectile AI Throttling
+		}
+
+		LightingOptimizationEnabled: {
+			Label: Lighting Optimization
+			Tooltip: Skips off-screen Lighting.AddLight() calls, reducing lighting background thread work. Uses a 40-tile margin so light from partially-visible entities is never clipped. Pure visual optimization - no gameplay effect.
+		}
+	}
+
+	OverlayPosition: {
+		Tooltip: ""
+
+		TopLeft: {
+			Label: Top Left
+			Tooltip: ""
+		}
+
+		TopRight: {
+			Label: Top Right
+			Tooltip: ""
+		}
+
+		BottomLeft: {
+			Label: Bottom Left
+			Tooltip: ""
+		}
+
+		BottomRight: {
+			Label: Bottom Right
+			Tooltip: ""
+		}
+	}
+}
