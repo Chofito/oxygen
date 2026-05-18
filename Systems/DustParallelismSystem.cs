@@ -9,6 +9,7 @@ using Terraria.ModLoader;
 using Oxygen.Config;
 using Oxygen.Utilities;
 using MethodBody = Mono.Cecil.Cil.MethodBody;
+using static Oxygen.Utilities.ThreadUnsafeCallWatchdog;
 
 namespace Oxygen.Systems
 {
@@ -87,6 +88,11 @@ namespace Oxygen.Systems
 
                 _parallelEnabled = true;
 
+                // Install the watchdog AFTER IL hooks so the hook chain is fully built.
+                // This defers Lighting.AddLight() calls made by Calamity/Infernum ModDust
+                // during worker execution, preventing crashes from thread-unsafe lighting API.
+                ThreadUnsafeCallWatchdog.Install(Mod);
+
                 int workers = Math.Max(1, Environment.ProcessorCount - 1);
                 Mod.Logger.Info($"[Oxygen] DustParallelism: active with {workers} worker threads.");
             }
@@ -110,6 +116,9 @@ namespace Oxygen.Systems
             _fillerHook = null;
             _captureHook?.Dispose();
             _captureHook = null;
+
+            // Watchdog hooks must be removed AFTER IL hooks so the chain unwinds cleanly.
+            ThreadUnsafeCallWatchdog.Uninstall();
         }
 
         // ── IL hooks ─────────────────────────────────────────────────────────────
@@ -265,10 +274,20 @@ namespace Oxygen.Systems
 
             try
             {
+                // Open the watchdog window: any Lighting.AddLight() calls made by
+                // Calamity/Infernum ModDust on worker threads will be queued instead
+                // of executing immediately (which would cause lighting engine race conditions).
+                ThreadUnsafeCallWatchdog.Enable();
                 OxygenParallel.For(0, Main.maxDust, UpdateDustFiller);
+                // Drain queued AddLight calls on the main thread now that all workers
+                // have finished (OxygenParallel.For uses CountdownEvent sync internally).
+                ThreadUnsafeCallWatchdog.Disable();
             }
             catch (AggregateException ex)
             {
+                // Ensure watchdog is always closed, even on error.
+                ThreadUnsafeCallWatchdog.Disable();
+
                 _parallelEnabled = false;
                 _mod?.Logger.Error(
                     $"[Oxygen] DustParallelism: runtime error, auto-disabled for this session. " +

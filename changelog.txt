@@ -1,0 +1,17 @@
+Oxygen v{ModVersion} for tML v{tMLVersion}
+[url=https://github.com/Chofito/oxygen]Source code[/url]
+
+[h2]v0.2[/h2]
+
+[b]ThreadUnsafeCallWatchdog[/b]
+Fixes the DustParallelism crash that occurred when mod dust classes call Lighting.AddLight from their Update method during parallel worker execution. Those calls are now intercepted, queued, and executed on the main thread after the parallel window closes.
+
+[b]FasterPylonSystem[/b]
+Replaces the vanilla pylon proximity scan with a direct iteration over the active pylon list. Complexity drops from O(reach area) to O(pylons).
+
+[b]LaserRulerRenderSystem[/b]
+Replaces the vanilla laser ruler renderer with one that draws ~200 shapes instead of ~14000 individual tile calls. Only active when the laser ruler accessory is equipped.
+
+[h2]v0.1[/h2]
+
+Initial release. Dust culling, dust parallelism, projectile parallelism, NPC AI throttling, gore culling, sound throttling, world update throttling, lighting optimization, GC management, diagnostics overlay.

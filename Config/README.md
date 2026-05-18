@@ -1,7 +1,7 @@
 # Config - Oxygen Mod
 
-**File:** `ClientConfig.cs`  
-**Class:** `ClientConfig : ModConfig`  
+**File:** `ClientConfig.cs`
+**Class:** `ClientConfig : ModConfig`
 **Scope:** `ConfigScope.ClientSide` - never synced to the server. The server always uses default values.
 
 ---
@@ -12,43 +12,41 @@
 
 | Property | Type | Default | Range | Description |
 |---|---|---|---|---|
-| `DustUpdateThrottling` | bool | `true` | - | Enables DustOptimizationSystem (viewport cull + density cap) |
-| `DustDensityPercent` | int | `80` | 0–100 | % of max particles allowed. 80 = max 4 800 active dust |
-| `DustCullDistance` | int | `80` | 20–200 | Tiles from the player. Dust farther away is culled when over the density cap |
+| `DustUpdateThrottling` | bool | `true` | | Enables DustOptimizationSystem (viewport cull + density cap) |
+| `DustDensityPercent` | int | `80` | 0-100 | % of max particles allowed. 80 = max 4800 active dust |
+| `DustCullDistance` | int | `80` | 20-200 | Tiles from the player. Dust farther away is culled when over the density cap |
 
 ### Projectiles
 
 | Property | Type | Default | Range | Description |
 |---|---|---|---|---|
-| `HideAllyProjectilesEnabled` | bool | `true` | - | Enables GlobalProjectileHooks (hide/dim ally projectiles) |
-| `HideAllyProjectilesBossOnly` | bool | `true` | - | Only hide ally projectiles while a boss is active |
-| `ProjectileOpacityPercent` | int | `0` | 0–100 | 0 = fully invisible. 1–100 = reduce alpha to that % |
-| `ProjectileAIThrottlingEnabled` | bool | `true` | - | Skip AI every other tick for off-screen visual-only projectiles (damage=0) |
+| `HideAllyProjectilesEnabled` | bool | `true` | | Enables GlobalProjectileHooks (hide/dim ally projectiles) |
+| `HideAllyProjectilesBossOnly` | bool | `true` | | Only hide ally projectiles while a boss is active |
+| `ProjectileOpacityPercent` | int | `0` | 0-100 | 0 = fully invisible. 1-100 = reduce alpha to that % |
+| `ProjectileAIThrottlingEnabled` | bool | `true` | | Skip AI every other tick for off-screen visual-only projectiles (damage=0) |
 
 ### NPC Throttling
 
 | Property | Type | Default | Range | Description |
 |---|---|---|---|---|
-| `NPCThrottlingEnabled` | bool | `true` | - | Enables GlobalNPCHooks (skip AI for distant NPCs) |
-| `NPCThrottleStartDistance` | int | `80` | 40–300 | Tiles. NPCs beyond this distance begin to be throttled |
-| `TownNPCThrottlingEnabled` | bool | `false` | - | Throttle off-screen town NPCs (~20 Hz). Near-player NPCs always run full AI |
-
-> With Infernum active, the system forces a minimum of 160 tiles, overriding smaller values.
+| `NPCThrottlingEnabled` | bool | `true` | | Enables GlobalNPCHooks (skip AI for distant NPCs) |
+| `NPCThrottleStartDistance` | int | `80` | 40-300 | Tiles. NPCs beyond this distance begin to be throttled |
+| `TownNPCThrottlingEnabled` | bool | `false` | | Throttle off-screen town NPCs (~20 Hz). Near-player NPCs always run full AI |
 
 ### Gore
 
 | Property | Type | Default | Range | Description |
 |---|---|---|---|---|
-| `GoreCullingEnabled` | bool | `true` | - | Enables GoreCullingSystem |
-| `GoreTimeoutTicks` | int | `300` | 60–600 | Off-screen ticks before removing gore. 300 = 5 seconds |
+| `GoreCullingEnabled` | bool | `true` | | Enables GoreCullingSystem |
+| `GoreTimeoutTicks` | int | `300` | 60-600 | Off-screen ticks before removing gore. 300 = 5 seconds |
 
 ### Sound
 
 | Property | Type | Default | Range | Description |
 |---|---|---|---|---|
-| `SoundThrottlingEnabled` | bool | `true` | - | Enables SoundThrottlingSystem |
-| `MaxSoundInstancesPerWindow` | int | `3` | 1–10 | Max times the same sound can play within the window |
-| `SoundWindowTicks` | int | `10` | 5–30 | Time window in ticks. 10 ticks ≈ 0.17 seconds |
+| `SoundThrottlingEnabled` | bool | `true` | | Enables SoundThrottlingSystem |
+| `MaxSoundInstancesPerWindow` | int | `3` | 1-10 | Max times the same sound can play within the window |
+| `SoundWindowTicks` | int | `10` | 5-30 | Time window in ticks. 10 ticks ≈ 0.17 seconds |
 
 ### World
 
@@ -60,9 +58,15 @@
 
 | Property | Type | Default | Description |
 |---|---|---|---|
-| `GCManagementEnabled` | bool | `false` | Enables GCPressureManager. **Aggressive - enable with caution** |
+| `GCManagementEnabled` | bool | `false` | Enables GCPressureManager. Enable with caution |
 
-> Default `false` because `GCLatencyMode.SustainedLowLatency` allows memory to grow during a boss fight. In long sessions with many mods this may approach OOM.
+Default `false` because `GCLatencyMode.SustainedLowLatency` allows memory to grow during a boss fight. In long sessions with many mods this may approach OOM.
+
+### Lighting
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `LightingOptimizationEnabled` | bool | `true` | Skip Lighting.AddLight() for positions outside the viewport (40-tile margin) |
 
 ### Parallelism
 
@@ -71,13 +75,14 @@
 | `DustParallelismEnabled` | bool | `true` | Enables DustParallelismSystem (distributes UpdateDust across multiple cores) |
 | `ProjectileParallelismEnabled` | bool | `true` | Enables ProjectileParallelismSystem (visual-only projectiles run in parallel) |
 
-> Both auto-disable on any runtime error. Require ≥ 2 logical cores.
+Both auto-disable on any runtime error. Require 2 or more logical cores.
 
-### Lighting
+### Misc
 
 | Property | Type | Default | Description |
 |---|---|---|---|
-| `LightingOptimizationEnabled` | bool | `true` | Skip Lighting.AddLight() for positions outside the viewport (40-tile margin) |
+| `FasterPylonEnabled` | bool | `true` | Enables FasterPylonSystem (O(pylons) proximity check instead of area scan) |
+| `NewLaserRulerRenderingEnabled` | bool | `true` | Enables LaserRulerRenderSystem (~200 draw calls vs ~14000 vanilla) |
 
 ### Diagnostics
 

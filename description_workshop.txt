@@ -1,22 +1,29 @@
-Oxygen is a pure performance optimization mod - no new items, no gameplay changes.
+[url=https://github.com/Chofito/oxygen] Oxygen [/url] is a pure performance mod. No new items. No gameplay changes. All settings are client-side and independently toggle-able from Mod Config.
 
-Designed for heavy modpacks like [b]Calamity + Infernum + Wrath of the Gods + Thorium[/b] where boss fights can drop to single-digit FPS. Every feature is independently toggle-able from Mod Config (client-side only).
+Recommended for content-heavy modpacks where boss fights cause frame drops.
 
-[h1]What it does[/h1]
+Not compatible with Nitrate.
+
+[h1]Features[/h1]
 [list]
-[*][b]Dust culling & parallelism[/b] - removes off-screen dust, caps density, and runs the update loop across multiple CPU cores using IL patching
-[*][b]Projectile parallelism[/b] - runs visual-only projectiles (damage=0, non-hostile) in parallel; damage-dealing projectiles always run sequentially
-[*][b]NPC AI throttling[/b] - reduces AI update frequency for distant non-boss NPCs; never touches bosses or boss segments
-[*][b]Gore culling[/b] - removes off-screen gore after a configurable timeout
-[*][b]Sound throttling[/b] - prevents the same sound from playing more than N times per window
-[*][b]World update throttling[/b] - halves grass/biome spread update rate during boss fights (singleplayer only)
-[*][b]Lighting optimization[/b] - skips off-screen Lighting.AddLight() calls, reducing background thread work
-[*][b]GC management[/b] - switches to SustainedLowLatency GC mode during boss fights to reduce pause spikes (disabled by default)
-[*][b]Diagnostics overlay[/b] - per-system frame time breakdown with rolling averages (disabled by default)
+[*][b]Dust culling[/b]: removes off-screen dust particles and caps total density
+[*][b]Dust parallelism[/b]: distributes the dust update loop across multiple CPU cores
+[*][b]Projectile parallelism[/b]: runs visual-only projectiles in parallel; damage-dealing and hostile projectiles always run sequentially
+[*][b]NPC AI throttling[/b]: reduces update frequency for distant non-boss NPCs; bosses and boss segments are never touched
+[*][b]Gore culling[/b]: removes off-screen gore after a configurable timeout
+[*][b]Sound throttling[/b]: limits how many times the same sound can play per time window
+[*][b]World update throttling[/b]: halves grass and biome spread update rate during boss fights (singleplayer only)
+[*][b]Lighting optimization[/b]: skips off-screen light source calls, reducing background thread work
+[*][b]Pylon optimization[/b]: faster pylon proximity check
+[*][b]Laser ruler rendering[/b]: replaces the vanilla laser ruler renderer with one that uses ~200 draw calls instead of ~14000
+[*][b]GC management[/b]: switches to low-latency GC mode during boss fights to reduce stutter (disabled by default)
+[*][b]Diagnostics overlay[/b]: per-system frame time breakdown with rolling averages (disabled by default)
 [/list]
 
 [h1]Multiplayer[/h1]
-Safe for co-op. All systems have guards for MultiplayerClient vs Server contexts. Client-only features (dust, gore, rendering) run on each client independently. NPC throttling is disabled on non-host clients to prevent desync.
+Safe for co-op. Visual features run per client independently. NPC throttling is disabled on non-host clients to prevent desync.
 
 [h1]ModCall API[/h1]
-Other mods can call [c]ModLoader.GetMod("Oxygen").Call("ExemptNPCFromThrottling", npcType)[/c] or [c]("ExemptProjectileFromHiding", projectileType)[/c] to opt specific types out of optimization.
+Other mods can call Oxygen to exempt specific NPC or projectile types from optimizations:
+[c]ModLoader.GetMod("Oxygen").Call("ExemptNPCFromThrottling", npcType)[/c]
+[c]ModLoader.GetMod("Oxygen").Call("ExemptProjectileFromHiding", projectileType)[/c]

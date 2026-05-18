@@ -1,7 +1,7 @@
 # Utilities - Oxygen Mod
 
-Internal utility classes used by Oxygen's systems.  
-Both are `internal static` - they are not part of the public API.
+Internal utility classes used by Oxygen's systems.
+Not part of the public API.
 
 ---
 
@@ -35,21 +35,17 @@ CountdownEvent.Wait()   ← blocks until all workers finish
 ### Exception handling
 Each worker captures its exception with `Interlocked.CompareExchange` (only the first is kept). Once all workers finish, if there was an error, an `AggregateException` is thrown.
 
-This is an improvement over **Nitrate mod** (the original reference), which released the `CountdownEvent` silently on exception, making errors invisible.
-
-### Callers
-`DustParallelismSystem.RunParallel()` and `ProjectileParallelismSystem.RunParallel()`.
+The callers (`DustParallelismSystem`, `ProjectileParallelismSystem`) catch this exception, disable the parallel path, and fall back to sequential for the rest of the session.
 
 ### Notes
-- The caller **must** handle `AggregateException`. Both parallelism systems do so by disabling the parallel path and falling back to sequential.
-- No cancellation - if a worker blocks indefinitely, `CountdownEvent.Wait()` also blocks. In practice, `UpdateDustFiller` and `UpdateSafePartition` cannot block (no I/O or locks of their own).
+- The caller must handle `AggregateException`.
+- No cancellation - if a worker blocks indefinitely, `CountdownEvent.Wait()` also blocks. In practice the registered worker bodies (`UpdateDustFiller`, `UpdateSafePartition`) cannot block - they contain no I/O or locks of their own.
 
 ---
 
 ## ILMethodBodyCloner
 
-**File:** `ILMethodBodyCloner.cs`  
-**Based on:** Nitrate mod's `IntermediateLanguageUtil` (MIT License) - simplified.
+**File:** `ILMethodBodyCloner.cs`
 
 ### Purpose
 Clone the IL body of a method (`Mono.Cecil.Cil.MethodBody`) into a destination `ILCursor`, remapping all internal references (branch targets, exception handlers, local variables).
@@ -72,8 +68,37 @@ internal static void CloneBodyToCursor(MethodBody source, ILCursor cursor)
 - `SequencePoints` (debug info) - not needed at runtime and adds fragility.
 - `CustomDebugInformations` - same reason.
 
-### Difference from Nitrate
-Nitrate's version also cloned debug points. Oxygen's version omits them deliberately to simplify the code and reduce failure points.
-
 ### Why this helper exists
 MonoMod/Cecil does not expose a high-level "clone method body" API. Copying instructions without remapping branch targets produces invalid IL (branches point to instructions from another method that no longer exist in the active module). This helper centralizes that logic correctly.
+
+---
+
+## ThreadUnsafeCallWatchdog
+
+**File:** `ThreadUnsafeCallWatchdog.cs`
+
+### Problem
+Some ModDust classes in content mods call `Lighting.AddLight()` inside their `Update()` or `MidUpdate()` overrides. When `DustParallelismSystem` dispatches dust updates to worker threads, those `ModDust.Update()` calls execute `Lighting.AddLight()` from non-main threads, causing race conditions in the lighting engine and intermittent crashes.
+
+### Solution
+Intercept both `Lighting.AddLight` overloads via `Hook` with reflection. While the parallel window is open (`Enable()`), each call is queued as an `Action` in a `ConcurrentBag`. When `Disable()` is called (after all workers have completed), the queue is drained sequentially on the main thread.
+
+### API
+```csharp
+ThreadUnsafeCallWatchdog.Enable();   // open parallel window - calls are queued
+OxygenParallel.For(...);             // workers may call AddLight safely
+ThreadUnsafeCallWatchdog.Disable();  // close window and drain queue on main thread
+```
+
+### Interaction with LightingOptimizationSystem
+`LightingOptimizationSystem` adds an ILHook inside `AddLight(int,int,float,float,float)` that skips off-screen calls. The Watchdog adds a Hook that wraps around that modified body. When the queue is drained, calls go through the hook chain again with `_enabled=false`, and the viewport check still runs. Off-screen lights queued by workers are correctly discarded at drain time.
+
+### Thread safety
+- `ConcurrentBag<Action>` supports concurrent `Add` from multiple worker threads.
+- `_enabled` is `volatile` - worker threads always see the latest value without a lock.
+- Drain happens only after `OxygenParallel.For` returns (CountdownEvent sync), so there are no concurrent writers during the drain.
+
+### Lifecycle
+- `Install(Mod)` is called from `DustParallelismSystem.OnModLoad()` after IL hooks are registered.
+- `Uninstall()` is called from `DustParallelismSystem.Unregister()` after IL hooks are removed.
+- If either `AddLight` overload is not found (e.g. future tModLoader version changed the signature), a warning is logged and the Watchdog installs partially - DustParallelism remains active but that overload is unprotected.

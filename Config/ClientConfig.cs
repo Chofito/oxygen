@@ -152,6 +152,23 @@ namespace Oxygen.Config
         [DefaultValue(true)]
         public bool ProjectileParallelismEnabled { get; set; }
 
+        // --- Misc optimizations ---
+        [Header("Misc")]
+        [Label("Faster Pylon Proximity Check")]
+        [Tooltip("Replaces the vanilla pylon-proximity scan with a direct O(pylons) check. " +
+                 "Eliminates an area-scan that runs on every pylon teleport attempt. " +
+                 "Fully compatible with all mods — Calamity has no hooks on the pylon system.")]
+        [DefaultValue(true)]
+        public bool FasterPylonEnabled { get; set; }
+
+        [Label("Optimized Laser Ruler Rendering")]
+        [Tooltip("Replaces the vanilla laser ruler renderer (~14 000 draw calls) with an " +
+                 "optimized version that uses ~200 draw calls instead. " +
+                 "Only active while the laser ruler accessory is equipped and visible. " +
+                 "Visual result is identical to vanilla.")]
+        [DefaultValue(true)]
+        public bool NewLaserRulerRenderingEnabled { get; set; }
+
         // --- Diagnostics ---
         [Header("Diagnostics")]
         [Label("Show Diagnostics Overlay")]

@@ -1,9 +1,11 @@
 Oxygen is a pure performance optimization mod with zero gameplay changes.
-Targets heavy modpacks (Calamity, Infernum, Wrath of the Gods, Thorium) where boss fights
-drop below 30 FPS. All features are toggle-able per client via Mod Config.
+Recommended for content-heavy modpacks where boss fights cause frame drops.
+All features are toggle-able per client via Mod Config.
 
 Optimizations: dust culling, dust parallelism, projectile parallelism, NPC AI throttling,
-gore culling, sound throttling, world update throttling, lighting optimization, GC management.
-Includes a diagnostics overlay with per-system frame time breakdown.
+gore culling, sound throttling, world update throttling, lighting optimization,
+pylon optimization, laser ruler rendering, GC management.
 
+Includes a diagnostics overlay with per-system frame time breakdown.
 Safe for multiplayer. Each feature has independent multiplayer guards.
+Not compatible with Nitrate.

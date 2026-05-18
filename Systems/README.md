@@ -1,6 +1,6 @@
 # Systems - Oxygen Mod
 
-Contains the `ModSystem` classes that implement Oxygen's optimizations.  
+Contains the `ModSystem` classes that implement Oxygen's optimizations.
 All are client-side; each one self-disables cleanly on load failure.
 
 ---
@@ -18,13 +18,15 @@ All are client-side; each one self-disables cleanly on load failure.
 | `WorldUpdateSystem.cs` | Reduce UpdateWorld_Inner frequency | ILHook on `WorldGen.UpdateWorld` | CPU |
 | `LightingOptimizationSystem.cs` | Skip off-screen AddLight calls | ILHook on `Lighting.AddLight` | CPU (lighting thread) |
 | `GCPressureManager.cs` | Reduce GC pauses during boss fights | `PostUpdateEverything` (pure C#) | GC pauses |
+| `FasterPylonSystem.cs` | O(pylons) pylon proximity check | Hook on `TeleportPylonsSystem.IsPlayerNearAPylon` | CPU |
+| `LaserRulerRenderSystem.cs` | Optimized laser ruler rendering | ILHook on `Main.DrawInterface_3_LaserRuler` | GPU |
 | `FrameTimeDiagnosticsSystem.cs` | Diagnostics overlay + per-system profiler | `Pre/PostUpdateX` + `PostDrawInterface` | Visual |
 
 ---
 
 ## DustOptimizationSystem
 
-**File:** `DustOptimizationSystem.cs`  
+**File:** `DustOptimizationSystem.cs`
 **Hook:** `PreUpdateDusts()` - runs before the game updates dust particles.
 
 ### What it does
@@ -39,44 +41,45 @@ Off-screen dust consumes CPU time in `UpdateDust` but is never rendered. Removin
 | Key | Default | Description |
 |---|---|---|
 | `DustUpdateThrottling` | `true` | Enable/disable the entire system |
-| `DustDensityPercent` | `80` | % of max dust allowed (0–100) |
+| `DustDensityPercent` | `80` | % of max dust allowed (0-100) |
 | `DustCullDistance` | `80` | Tiles from the player for the density cull |
 
 ### Notes
-- Operates directly on `Main.dust` - **not thread-safe** if mixed with `DustParallelismSystem`. However, `PreUpdateDusts` fires *before* `DustParallelismSystem` parallelizes the loop, so there is no data race.
+- Operates directly on `Main.dust` - not thread-safe if mixed with `DustParallelismSystem`. However, `PreUpdateDusts` fires before the parallel loop starts, so there is no data race.
 - Only deactivates particles; does not modify opacity or scale.
 
 ---
 
 ## DustParallelismSystem
 
-**File:** `DustParallelismSystem.cs`  
+**File:** `DustParallelismSystem.cs`
 **Hook:** Three `ILHook`s on `Dust.UpdateDust()` (installed in `OnModLoad`).
 
-### Strategy (inspired by Nitrate mod, with safety improvements)
+### Strategy
 
 ```
 OnModLoad:
   1. CaptureBody    ILHook → saves the original MethodBody of UpdateDust
   2. PatchFiller    ILHook → injects the cloned body into UpdateDustFiller(int, int)
   3. PatchLoop      ILHook → replaces the sequential loop with a call to RunParallel()
+  4. ThreadUnsafeCallWatchdog.Install() → defers Lighting.AddLight from workers
 
 Frame N:
-  Dust.UpdateDust() → RunParallel() → OxygenParallel.For(0, maxDust, UpdateDustFiller)
-                                      ├── Worker 0: UpdateDustFiller(0,    N/4)
-                                      ├── Worker 1: UpdateDustFiller(N/4,  N/2)
-                                      ├── Worker 2: UpdateDustFiller(N/2,  3N/4)
-                                      └── Main   : UpdateDustFiller(3N/4, N)   ← no dispatch
+  Dust.UpdateDust() → RunParallel()
+      → Watchdog.Enable()
+      → OxygenParallel.For(0, maxDust, UpdateDustFiller)
+          ├── Worker 0: UpdateDustFiller(0,    N/4)
+          ├── Worker 1: UpdateDustFiller(N/4,  N/2)
+          ├── Worker 2: UpdateDustFiller(N/2,  3N/4)
+          └── Main   : UpdateDustFiller(3N/4, N)   ← no dispatch overhead
+      → Watchdog.Disable()  ← drains queued Lighting.AddLight on main thread
 ```
 
-### Improvements over Nitrate
-- Worker exceptions are caught and re-thrown as `AggregateException` (Nitrate silenced them).
-- On any runtime error, `_parallelEnabled = false` and the rest of the session runs sequentially.
-- If hook installation fails (tModLoader changed the IL), the feature disables without crashing.
+### Safety properties
+- Worker exceptions are caught and re-thrown as `AggregateException`. On any runtime error, `_parallelEnabled = false` and the rest of the session runs sequentially.
+- If hook installation fails (e.g. tModLoader changed the IL structure), the feature disables without crashing.
 - Requires `ProcessorCount >= 2`.
-
-### Thread safety
-`UpdateDustFiller` runs on ThreadPool workers. If a `ModDust.Update()` (e.g. from Calamity/Infernum) makes non-thread-safe calls, it can crash. The system detects this, disables the parallel path, and continues sequentially.
+- `ThreadUnsafeCallWatchdog` handles `Lighting.AddLight()` calls that ModDust classes may make from worker threads. See `Utilities/README.md`.
 
 ### Relevant config
 | Key | Default | Description |
@@ -87,7 +90,7 @@ Frame N:
 
 ## GoreCullingSystem
 
-**File:** `GoreCullingSystem.cs`  
+**File:** `GoreCullingSystem.cs`
 **Hook:** `PreUpdateGores()` - before the gore update.
 
 ### What it does
@@ -102,14 +105,14 @@ Gore may be momentarily off-screen when spawned (e.g. an explosion at the viewpo
 ### Relevant config
 | Key | Default | Range | Description |
 |---|---|---|---|
-| `GoreCullingEnabled` | `true` | - | Enable/disable |
-| `GoreTimeoutTicks` | `300` | 60–600 | Off-screen ticks before removal (300 = 5 s) |
+| `GoreCullingEnabled` | `true` | | Enable/disable |
+| `GoreTimeoutTicks` | `300` | 60-600 | Off-screen ticks before removal (300 = 5 s) |
 
 ---
 
 ## SoundThrottlingSystem
 
-**File:** `SoundThrottlingSystem.cs`  
+**File:** `SoundThrottlingSystem.cs`
 **Hook:** `ILHook` on `SoundEngine.PlaySound(in SoundStyle, Vector2?, SoundUpdateCallback?)`.
 
 ### Why ILHook (not `On.`)
@@ -127,24 +130,24 @@ ret                       ; return without playing
 ```
 
 ### Throttling logic
-`Dictionary<string, Queue<uint>>` keyed by `SoundStyle.SoundPath`.  
+`Dictionary<string, Queue<uint>>` keyed by `SoundStyle.SoundPath`.
 For each sound: evict plays older than the window; if count >= `MaxSoundInstancesPerWindow`, suppress.
 
-### Thread safety - CRITICAL
-`SoundEngine.PlaySound` can be called from ThreadPool workers via `ModDust.Update()` inside `DustParallelismSystem`. **All dictionary access is inside `lock(_lock)`**, including the periodic cleanup in `PostUpdateEverything`.
+### Thread safety
+`SoundEngine.PlaySound` can be called from ThreadPool workers during `DustParallelismSystem` execution. All dictionary access is inside `lock(_lock)`, including the periodic cleanup in `PostUpdateEverything`.
 
 ### Relevant config
 | Key | Default | Range | Description |
 |---|---|---|---|
-| `SoundThrottlingEnabled` | `true` | - | Enable/disable |
-| `MaxSoundInstancesPerWindow` | `3` | 1–10 | Max plays of the same sound in the window |
-| `SoundWindowTicks` | `10` | 5–30 | Time window in ticks (~0.17 s at default) |
+| `SoundThrottlingEnabled` | `true` | | Enable/disable |
+| `MaxSoundInstancesPerWindow` | `3` | 1-10 | Max plays of the same sound in the window |
+| `SoundWindowTicks` | `10` | 5-30 | Time window in ticks (~0.17 s at default) |
 
 ---
 
 ## WorldUpdateSystem
 
-**File:** `WorldUpdateSystem.cs`  
+**File:** `WorldUpdateSystem.cs`
 **Hook:** `ILHook` on `WorldGen.UpdateWorld()`.
 
 ### Context: tModLoader's method split
@@ -168,10 +171,10 @@ call UpdateWorld_Inner       ; original call (now conditional)
 ### Skip condition
 `ShouldSkipInnerUpdate()` returns `true` only if:
 - A boss is active (`npc.boss == true`)
-- **AND** `Main.GameUpdateCount % 2 != 0` (odd ticks only → 30 Hz)
-- **AND** `Main.netMode == NetmodeID.SinglePlayer`
+- `Main.GameUpdateCount % 2 != 0` (odd ticks only → 30 Hz)
+- `Main.netMode == NetmodeID.SinglePlayer`
 
-Ambient effects (grass growth, Corruption spread) are imperceptible at 30 Hz.
+Ambient effects (grass growth, biome spread) are imperceptible at 30 Hz.
 
 ### Relevant config
 | Key | Default | Description |
@@ -182,7 +185,7 @@ Ambient effects (grass growth, Corruption spread) are imperceptible at 30 Hz.
 
 ## LightingOptimizationSystem
 
-**File:** `LightingOptimizationSystem.cs`  
+**File:** `LightingOptimizationSystem.cs`
 **Hook:** `ILHook` on `Lighting.AddLight(int tileX, int tileY, float r, float g, float b)`.
 
 ### What it does
@@ -193,10 +196,13 @@ if (IsOutsideViewport(tileX, tileY)) return;
 Uses the existing `ret` at the end of the method as the jump target - no new instructions added.
 
 ### Why it helps
-During a boss fight with 125 NPCs and 235 projectiles, 300–400 `AddLight` calls fire per tick, many for entities far off-screen. Each call queues work on the lighting background thread. Culling off-screen calls reduces that queue, letting the thread finish sooner and reducing the CPU sync cost at the start of the next frame.
+During a boss fight with many NPCs and projectiles, hundreds of `AddLight` calls fire per tick, many for entities far off-screen. Each call queues work on the lighting background thread. Culling off-screen calls reduces that queue, letting the thread finish sooner and reducing the CPU sync cost at the start of the next frame.
 
 ### Viewport margin
 40 tiles (~640 px) - generous enough to cover large NPC sprites and light spread reaching the screen edge.
+
+### Interaction with ThreadUnsafeCallWatchdog
+The Watchdog adds a Hook on the same method. When workers call `AddLight`, the Watchdog queues the call. When the queue is drained on the main thread, the call goes through this ILHook's viewport check again - off-screen lights are correctly discarded at drain time.
 
 ### Relevant config
 | Key | Default | Description |
@@ -207,7 +213,7 @@ During a boss fight with 125 NPCs and 235 projectiles, 300–400 `AddLight` call
 
 ## GCPressureManager
 
-**File:** `GCPressureManager.cs`  
+**File:** `GCPressureManager.cs`
 **Hook:** `PostUpdateEverything()` (pure C#, no IL patches).
 
 ### Two-phase strategy
@@ -216,7 +222,7 @@ During a boss fight with 125 NPCs and 235 projectiles, 300–400 `AddLight` call
 ```csharp
 GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
 ```
-The .NET 8 GC avoids blocking Gen-2 collections and prefers background GC → fewer 50–200 ms stutters.
+The .NET 8 GC avoids blocking Gen-2 collections and prefers background GC → fewer 50-200 ms stutters.
 
 **120 ticks (~2 s) after the boss dies:**
 ```csharp
@@ -225,7 +231,7 @@ GC.Collect(2, GCCollectionMode.Optimized, blocking: false, compacting: true);
 Reclaims garbage accumulated during the fight in the background, before it can cause a large pause later.
 
 ### Why disabled by default
-`SustainedLowLatency` allows memory to grow during the fight without being reclaimed. In very long sessions with high allocation rates (Calamity + Infernum) this may approach OOM. Monitor Task Manager before enabling.
+`SustainedLowLatency` allows memory to grow during the fight without being reclaimed. In very long sessions with high allocation rates this may approach OOM. Monitor Task Manager before enabling.
 
 ### Cleanup
 The original GC mode is restored in `OnWorldUnload`, `OnModUnload`, and when the feature is disabled mid-session.
@@ -237,9 +243,65 @@ The original GC mode is restored in `OnWorldUnload`, `OnModUnload`, and when the
 
 ---
 
+## FasterPylonSystem
+
+**File:** `FasterPylonSystem.cs`
+**Hook:** `Hook` on `TeleportPylonsSystem.IsPlayerNearAPylon(Player)`.
+
+### What it does
+Replaces the vanilla pylon proximity check with a direct iteration over `Main.PylonSystem.Pylons`.
+
+Vanilla: scans an area around the player → O(reach_area).
+Optimized: iterates the pylon list directly → O(pylons), typically O(1) for any normal world.
+
+### Implementation
+For each pylon entry, computes the exact reach bounds using `TileReachCheckSettings.Pylons.GetRanges()` (the same method vanilla uses internally) and returns `true` on first match.
+
+### Notes
+- Only active on teleport attempts, not every frame.
+- Uses `Hook` with reflection instead of HookGen events for build stability.
+
+### Relevant config
+| Key | Default | Description |
+|---|---|---|
+| `FasterPylonEnabled` | `true` | Enable/disable |
+
+---
+
+## LaserRulerRenderSystem
+
+**File:** `LaserRulerRenderSystem.cs`
+**Hook:** `ILHook` on `Main.DrawInterface_3_LaserRuler()` (private instance method, reflection).
+
+### What it does
+Replaces the vanilla laser ruler renderer with one that draws ~200 shapes instead of ~14 000 individual tile calls.
+
+Vanilla: iterates every tile in the visible screen, one `SpriteBatch.Draw` per tile → ~14 000 calls at 1080p.
+Optimized:
+1. One full-screen tinted background.
+2. One draw per tile column (vertical grid lines).
+3. One draw per tile row (horizontal grid lines).
+4. Three draws for the mouse-tile red cross highlight.
+Total at 1080p: ~200 draw calls.
+
+### IL strategy
+Navigates past the two entrance guards of `DrawInterface_3_LaserRuler` (equipped check, opacity check), then injects a delegate. The delegate draws the optimized ruler and returns `true` to skip the vanilla loop. If it returns `false` (or throws), vanilla code runs as fallback.
+
+### Notes
+- Only active when the laser ruler accessory is equipped and visible.
+- No interaction with content mods.
+- Uses `Main.ReverseGravitySupport` to handle reversed gravity correctly.
+
+### Relevant config
+| Key | Default | Description |
+|---|---|---|
+| `NewLaserRulerRenderingEnabled` | `true` | Enable/disable |
+
+---
+
 ## FrameTimeDiagnosticsSystem
 
-**File:** `FrameTimeDiagnosticsSystem.cs`  
+**File:** `FrameTimeDiagnosticsSystem.cs`
 **Hooks:** Multiple `Pre/PostUpdateX` + `PostDrawTiles` + `PostDrawInterface`.
 
 ### Measured windows
@@ -253,14 +315,14 @@ The original GC mode is restored in `OnWorldUnload`, `OnModUnload`, and when the
 | Itms | `PreUpdateItems` | `PostUpdateItems` | Ground item physics |
 | Dust | `PreUpdateDusts` | `PostUpdateDusts` | Dust update (parallelized if active) |
 | Wrld | `PreUpdateWorld` | `PostUpdateWorld` | World tile spread |
-| ?Upd | `PreUpdatePlayers` | `PostUpdateEverything` minus known | Calamity/Infernum hooks, tModLoader overhead |
-| ΣUpd | - | - | `updateTotal × N` - real CPU cost per draw frame |
+| ?Upd | `PreUpdatePlayers` to `PostUpdateEverything` minus known | | Third-party mod hooks, tModLoader overhead |
+| ΣUpd | | | `updateTotal × N` - real CPU cost per draw frame |
 | Tile | `PostUpdateEverything` | `PostDrawTiles` | Tile geometry draw calls |
 | GFX | `PostUpdateEverything` | `PostDrawInterface` | NPCs, projectiles, shaders, UI |
 | ?Oth | Full frame minus update minus GFX | | Lighting thread sync, SoundEngine, XNA housekeeping |
 
 ### `Upd×N` - MonoGame catch-up loop
-When `IsFixedTimeStep=true` and the game lags, MonoGame fires N update calls before one draw call to compensate. `ΣUpd = updateTotal × N` is the real per-frame CPU update cost. If N=7 and updateTotal=19 ms, the actual cost is 133 ms.
+When the game lags, MonoGame fires N update calls before one draw call to compensate. `ΣUpd = updateTotal × N` is the real per-frame CPU update cost. If N=7 and updateTotal=19 ms, the actual cost is 133 ms.
 
 ### Implementation
 - Stopwatches run every frame regardless of overlay visibility (~16 Restart/Stop calls ≈ 1.6 µs/frame).
