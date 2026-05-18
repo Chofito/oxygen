@@ -4,10 +4,11 @@ using System.Threading;
 namespace Oxygen.Utilities
 {
     /// <summary>
-    /// Lightweight parallel-for utility using the ThreadPool directly.
-    /// - Worker exceptions are captured and re-thrown as AggregateException.
-    /// - The last partition always runs on the calling thread to avoid
-    ///   an unnecessary ThreadPool dispatch.
+    /// Based on Nitrate mod's FasterParallel.cs
+    /// Copyright (C) TeamCatalyst contributors — AGPL v3 (https://github.com/terraria-catalyst/nitrate-mod)
+    /// Changes: worker exceptions captured and re-thrown as AggregateException instead of
+    /// silently releasing the CountdownEvent; last partition runs on the calling thread
+    /// to avoid an unnecessary ThreadPool dispatch; simplified API (no context object).
     /// </summary>
     internal static class OxygenParallel
     {

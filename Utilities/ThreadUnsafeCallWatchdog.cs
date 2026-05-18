@@ -44,8 +44,11 @@ namespace Oxygen.Utilities
     ///   our interceptor falls through to orig) and the viewport check still runs —
     ///   off-screen lights queued by workers are correctly discarded at drain time.
     ///
-    /// Uses reflection-based hooks (no HookGen dependency) and documents
-    /// the interaction with LightingOptimizationSystem explicitly.
+    /// Based on Nitrate mod's ThreadUnsafeCallWatchdog.cs
+    /// Copyright (C) TeamCatalyst contributors — AGPL v3 (https://github.com/terraria-catalyst/nitrate-mod)
+    /// Changes: pre-allocated ring buffers with Interlocked.Increment instead of ConcurrentBag&lt;Action&gt;
+    /// closures (zero heap allocation per intercepted call), reflection-based hooks, explicit
+    /// documentation of interaction with LightingOptimizationSystem.
     /// </summary>
     public static class ThreadUnsafeCallWatchdog
     {

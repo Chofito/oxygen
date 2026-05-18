@@ -16,19 +16,17 @@ namespace Oxygen.Systems
     /// <summary>
     /// Parallelizes the vanilla Dust.UpdateDust() loop using IL patching.
     ///
+    /// Based on Nitrate mod's DustUpdateParallelismSystem.cs
+    /// Copyright (C) TeamCatalyst contributors — AGPL v3 (https://github.com/terraria-catalyst/nitrate-mod)
+    /// Changes: worker exceptions captured and re-thrown (Nitrate silences them), automatic
+    /// sequential fallback on error, MinParallelDustCount threshold to avoid scheduling
+    /// overhead at low particle counts, reflection-based ILHooks instead of IL_ delegates.
+    ///
     /// Strategy:
     ///   1. Capture the original Dust.UpdateDust IL body before modification.
     ///   2. Patch UpdateDust to skip its sequential loop and call RunParallel() instead.
     ///   3. Inject the cloned loop body (with adjustable bounds) into our UpdateDustFiller
     ///      stub via an ILHook, so each worker thread can run an independent slice.
-    ///
-    /// Safety design:
-    ///   - Worker exceptions are captured and re-thrown as AggregateException.
-    ///   - On any runtime error, falls back to sequential execution for that frame
-    ///     then auto-disables, so vanilla behaviour is never lost.
-    ///   - Hook installation is wrapped in try/catch; if IL patterns change between
-    ///     Terraria versions the feature simply disables itself instead of crashing.
-    ///   - Requires ProcessorCount >= 2 before enabling.
     /// </summary>
     public class DustParallelismSystem : ModSystem
     {

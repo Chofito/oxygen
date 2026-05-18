@@ -1,3 +1,6 @@
+// Based on Nitrate mod's FasterPylonSystem.cs
+// Copyright (C) TeamCatalyst contributors — AGPL v3 (https://github.com/terraria-catalyst/nitrate-mod)
+// Changes: reflection-based Hook instead of On_ delegate syntax, Oxygen config/logging.
 using System;
 using System.Reflection;
 using MonoMod.RuntimeDetour;

@@ -22,8 +22,12 @@ Copyright (C) TeamCatalyst contributors,
 licensed under the GNU Affero General Public License v3.
 
 Derived files:
-  Utilities/ILMethodBodyCloner.cs    — based on Nitrate's IntermediateLanguageUtil.cs
-  Systems/LaserRulerRenderSystem.cs  — based on Nitrate's NewLaserRulerRenderSystem.cs
+  Utilities/ILMethodBodyCloner.cs      — based on Nitrate's IntermediateLanguageUtil.cs
+  Utilities/OxygenParallel.cs          — based on Nitrate's FasterParallel.cs
+  Utilities/ThreadUnsafeCallWatchdog.cs— based on Nitrate's ThreadUnsafeCallWatchdog.cs
+  Systems/DustParallelismSystem.cs     — based on Nitrate's DustUpdateParallelismSystem.cs
+  Systems/FasterPylonSystem.cs         — based on Nitrate's FasterPylonSystem.cs
+  Systems/LaserRulerRenderSystem.cs    — based on Nitrate's NewLaserRulerRenderSystem.cs
 
 -------------------------------------------------------------------------------
 
