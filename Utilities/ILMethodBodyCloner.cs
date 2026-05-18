@@ -1,6 +1,7 @@
-// Based on Nitrate mod's IntermediateLanguageUtil (MIT License, terraria-catalyst/nitrate-mod)
-// Simplified: debug info (SequencePoints, CustomDebugInformations) are intentionally
-// not cloned - they are not needed at runtime and add fragility.
+// Based on Nitrate mod's IntermediateLanguageUtil.cs
+// Copyright (C) TeamCatalyst contributors — AGPL v3 (https://github.com/terraria-catalyst/nitrate-mod)
+// Modifications: removed debug info cloning (SequencePoints, CustomDebugInformations)
+// as they are not needed at runtime and add fragility.
 
 using System;
 using System.Linq;

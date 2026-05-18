@@ -38,8 +38,10 @@ namespace Oxygen.Systems
     ///   Zero interaction with Calamity, Infernum, or any content mod.
     ///   The laser ruler is a builder accessory — only active during building.
     ///
-    /// Ported from Nitrate mod (TeamCatalyst/Nitrate, NewLaserRulerRenderSystem.cs).
-    /// Changes: reflection-based ILHook (no HookGen events), Oxygen config/logging.
+    /// Based on Nitrate mod's NewLaserRulerRenderSystem.cs
+    /// Copyright (C) TeamCatalyst contributors — AGPL v3 (https://github.com/terraria-catalyst/nitrate-mod)
+    /// Changes: reflection-based ILHook instead of HookGen events, Oxygen config integration,
+    /// structured logging, and exception-safe fallback to vanilla rendering.
     /// </summary>
     public class LaserRulerRenderSystem : ModSystem
     {

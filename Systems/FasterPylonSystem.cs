@@ -1,9 +1,9 @@
 using System;
 using System.Reflection;
-using Microsoft.Xna.Framework;
 using MonoMod.RuntimeDetour;
 using Terraria;
 using Terraria.DataStructures;
+using Terraria.GameContent;
 using Terraria.ModLoader;
 using Oxygen.Config;
 
@@ -13,8 +13,8 @@ namespace Oxygen.Systems
     /// Replaces TeleportPylonsSystem.IsPlayerNearAPylon() with an O(pylons) implementation.
     ///
     /// Vanilla behaviour:
-    ///   The vanilla implementation scans an area around the player to find nearby pylons,
-    ///   which is O(reach_area) — proportional to the pylon's tile-reach radius squared.
+    ///   The vanilla implementation calls Player.IsTileTypeInInteractionRange(597, ...),
+    ///   which scans an area around the player proportional to the pylon reach radius squared.
     ///
     /// Optimized behaviour:
     ///   Iterate directly over Main.PylonSystem.Pylons (typically 0-10 entries), compute
@@ -22,12 +22,11 @@ namespace Oxygen.Systems
     ///   Complexity: O(pylons), effectively O(1) for any normal world.
     ///
     /// Compatibility:
-    ///   - Calamity has zero references to TeleportPylonsSystem or IsPlayerNearAPylon.
-    ///   - All reach/range logic uses TileReachCheckSettings.Pylons.GetRanges(), the same
-    ///     method used internally by vanilla, so pylon reach is unchanged.
+    ///   All reach/range logic uses TileReachCheckSettings.Pylons.GetRanges(), the same
+    ///   call used internally by vanilla, so pylon reach distance is unchanged.
     ///
-    /// Ported from Nitrate mod (TeamCatalyst/Nitrate, FasterPylonSystem.cs).
-    /// Changes: reflection-based Hook (no HookGen), Oxygen config/logging conventions.
+    /// Note: IsPlayerNearAPylon is a static method on TeleportPylonsSystem.
+    ///   The Hook delegate takes (Func orig, Player player) — no 'self' parameter.
     /// </summary>
     public class FasterPylonSystem : ModSystem
     {
@@ -41,9 +40,10 @@ namespace Oxygen.Systems
 
             try
             {
+                // IsPlayerNearAPylon is a PUBLIC STATIC method.
                 var method = typeof(TeleportPylonsSystem).GetMethod(
                     "IsPlayerNearAPylon",
-                    BindingFlags.Public | BindingFlags.Instance,
+                    BindingFlags.Public | BindingFlags.Static,
                     null,
                     new[] { typeof(Player) },
                     null);
@@ -56,9 +56,10 @@ namespace Oxygen.Systems
                     return;
                 }
 
+                // Static method Hook: orig is Func<Player, bool>, no 'self' parameter.
                 _pylonHook = new Hook(
                     method,
-                    new Func<TeleportPylonsSystem, Player, bool>(OnIsPlayerNearAPylon));
+                    new Func<Func<Player, bool>, Player, bool>(OnIsPlayerNearAPylon));
 
                 Mod.Logger.Info("[Oxygen] FasterPylon: O(pylons) pylon proximity check active.");
             }
@@ -78,10 +79,10 @@ namespace Oxygen.Systems
         // ── Hook ──────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Checks all active pylons directly, using the same reach-range logic as vanilla
-        /// but without scanning area tiles first.
+        /// Checks all active pylons directly using the same reach-range logic as vanilla
+        /// but without the area tile scan.
         /// </summary>
-        private static bool OnIsPlayerNearAPylon(TeleportPylonsSystem self, Player player)
+        private static bool OnIsPlayerNearAPylon(Func<Player, bool> orig, Player player)
         {
             foreach (var info in Main.PylonSystem.Pylons)
             {
@@ -94,10 +95,10 @@ namespace Oxygen.Systems
                 // GetRanges returns the tile-reach radius for the given player and reach type.
                 TileReachCheckSettings.Pylons.GetRanges(player, out int rangeX, out int rangeY);
 
-                int minX = Utils.Clamp(pos.X - rangeX,         0, Main.maxTilesX - 1);
-                int maxX = Utils.Clamp(lowerRight.X + rangeX - 1, 0, Main.maxTilesX - 1);
-                int minY = Utils.Clamp(pos.Y - rangeY - 1,     0, Main.maxTilesY - 1);
-                int maxY = Utils.Clamp(lowerRight.Y + rangeY - 1, 0, Main.maxTilesY - 1);
+                int minX = Utils.Clamp(pos.X - rangeX,              0, Main.maxTilesX - 1);
+                int maxX = Utils.Clamp(lowerRight.X + rangeX - 1,   0, Main.maxTilesX - 1);
+                int minY = Utils.Clamp(pos.Y - rangeY - 1,          0, Main.maxTilesY - 1);
+                int maxY = Utils.Clamp(lowerRight.Y + rangeY - 1,   0, Main.maxTilesY - 1);
 
                 if (playerTile.X >= minX && playerTile.X <= maxX &&
                     playerTile.Y >= minY && playerTile.Y <= maxY)

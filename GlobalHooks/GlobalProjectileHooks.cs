@@ -40,6 +40,14 @@ namespace Oxygen.GlobalHooks
             if (projectile.damage > 0 || projectile.hostile)
                 return true;
 
+            // Never throttle projectile AI during a boss fight.
+            // Mod boss intros use damage=0 projectiles as timing drivers — their ai[0]
+            // increments each AI tick as the intro counter. Throttling at 30 Hz means the
+            // counter reaches only half the threshold before timeLeft expires, so the intro's
+            // end condition never fires and the player stays permanently frozen.
+            if (SharedBossState.BossActive)
+                return true;
+
             // Skip if on-screen - visual effects near the player should always run.
             const int aiMargin = 256; // 16 tiles
             if (projectile.position.X + projectile.width  >= Main.screenPosition.X - aiMargin &&

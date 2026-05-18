@@ -31,6 +31,7 @@ PreAI(npc)
 │   ├── npc.boss == true?                         → return true  (bosses never throttled)
 │   ├── npc.realLife → active boss head?          → return true  (worm/chain segments)
 │   ├── npc.type in ExemptNPCs?                   → return true  (ModCall API)
+│   ├── SharedBossState.BossActive?               → return true  (boss fight — see note)
 │   │
 │   ├── [SP/Client] npc.target == myPlayer?       → update LastTargetedLocalPlayer[slot]
 │   ├── [SP/Client] targeted within last 60 ticks → return true  (actively chasing player)
@@ -48,6 +49,7 @@ PreAI(npc)
 - **Bosses** (`npc.boss`): never throttled.
 - **Town NPCs** (`npc.townNPC`): handled by a separate, more conservative path.
 - **Worm/chain segments** (`npc.realLife >= 0` and the head has `npc.boss`): the chain depends on every segment updating each tick. Throttling breaks relative position computation.
+- **Boss fights active** (`SharedBossState.BossActive`): all hostile NPCs run full AI. Mods spawn non-boss helper NPCs to drive phase transitions and cinematic intro sequences. These NPCs require tick-perfect AI; throttling them causes intros to stall, freezing the player and breaking the camera.
 - **NPCs that targeted the player recently** (last 60 ticks): prevents a chasing NPC from visibly "pausing" its AI.
 
 ### Multiplayer
@@ -60,9 +62,8 @@ PreAI(npc)
 ### Static state
 ```csharp
 internal static readonly int[] LastTargetedLocalPlayer = new int[201]; // tick when NPC targeted local player
-internal static bool InfernumActive;  // raises minimum startDist to 160 when Infernum is loaded
 ```
-Both arrays are cleared in `OnWorldLoad`.
+Cleared in `OnWorldLoad`.
 
 ### Relevant config
 | Key | Default | Range | Description |

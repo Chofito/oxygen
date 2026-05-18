@@ -132,6 +132,12 @@ bool active = (bool)Call("IsFeatureActive", "NPCThrottling");
 
 ---
 
+## AI Disclosure
+
+Parts of this mod's code and documentation were written with the assistance of Claude (Anthropic). All logic was reviewed, tested, and committed by the author.
+
+---
+
 ## Thread safety notes
 
 `DustParallelismSystem` runs dust updates on worker threads. To prevent crashes from thread-unsafe API calls made by third-party ModDust classes during worker execution:

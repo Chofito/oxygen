@@ -16,14 +16,14 @@ namespace Oxygen.Systems
     /// <summary>
     /// Parallelizes the vanilla Dust.UpdateDust() loop using IL patching.
     ///
-    /// Strategy (mirrors Nitrate mod's approach, with major safety improvements):
+    /// Strategy:
     ///   1. Capture the original Dust.UpdateDust IL body before modification.
     ///   2. Patch UpdateDust to skip its sequential loop and call RunParallel() instead.
     ///   3. Inject the cloned loop body (with adjustable bounds) into our UpdateDustFiller
     ///      stub via an ILHook, so each worker thread can run an independent slice.
     ///
-    /// Safety improvements over Nitrate:
-    ///   - Worker exceptions are captured and re-thrown (Nitrate silences them).
+    /// Safety design:
+    ///   - Worker exceptions are captured and re-thrown as AggregateException.
     ///   - On any runtime error, falls back to sequential execution for that frame
     ///     then auto-disables, so vanilla behaviour is never lost.
     ///   - Hook installation is wrapped in try/catch; if IL patterns change between
@@ -49,6 +49,12 @@ namespace Oxygen.Systems
         private ILHook? _captureHook;   // CaptureBody on Dust.UpdateDust
         private ILHook? _fillerHook;    // PatchFiller on UpdateDustFiller stub
         private ILHook? _patchLoopHook; // PatchLoop  on Dust.UpdateDust
+
+        // Minimum active dust count before parallelism is worth its scheduling overhead.
+        // Below this, sequential is faster. SharedBossState.ActiveDustCount is 1 frame stale
+        // (updated in PostUpdateEverything, after dust updates), which is fine — dust count
+        // doesn't change dramatically between frames.
+        private const int MinParallelDustCount = 500;
 
         // Runtime state.
         private static bool _parallelEnabled;  // true while parallel is healthy
@@ -264,14 +270,16 @@ namespace Oxygen.Systems
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void RunParallel()
         {
-            if (!_parallelEnabled)
+            // Sequential fallback: parallel disabled, or dust count below the threshold
+            // where scheduling overhead outweighs the parallelism benefit.
+            // SharedBossState.ActiveDustCount is 1 frame stale but accurate enough.
+            if (!_parallelEnabled || SharedBossState.ActiveDustCount < MinParallelDustCount)
             {
-                // Parallel is disabled - run the cloned loop sequentially so dust
-                // still updates normally (the original loop was already skipped).
                 UpdateDustFiller(0, Main.maxDust);
                 return;
             }
 
+            Exception? fault = null;
             try
             {
                 // Open the watchdog window: any Lighting.AddLight() calls made by
@@ -279,21 +287,29 @@ namespace Oxygen.Systems
                 // of executing immediately (which would cause lighting engine race conditions).
                 ThreadUnsafeCallWatchdog.Enable();
                 OxygenParallel.For(0, Main.maxDust, UpdateDustFiller);
+            }
+            catch (Exception ex)
+            {
+                // Capture any exception (AggregateException or otherwise).
+                // Disable() will still run in the finally block below.
+                fault = ex;
+            }
+            finally
+            {
                 // Drain queued AddLight calls on the main thread now that all workers
                 // have finished (OxygenParallel.For uses CountdownEvent sync internally).
+                // finally guarantees this runs even if an unexpected exception is thrown.
                 ThreadUnsafeCallWatchdog.Disable();
             }
-            catch (AggregateException ex)
-            {
-                // Ensure watchdog is always closed, even on error.
-                ThreadUnsafeCallWatchdog.Disable();
 
+            if (fault != null)
+            {
                 _parallelEnabled = false;
                 _mod?.Logger.Error(
                     $"[Oxygen] DustParallelism: runtime error, auto-disabled for this session. " +
-                    $"Inner: {ex.InnerException?.Message ?? ex.Message}");
+                    $"({fault.GetType().Name}: {fault.InnerException?.Message ?? fault.Message})");
 
-                // Still need to update dust this frame.
+                // Still need to update dust this frame since the original loop was skipped.
                 UpdateDustFiller(0, Main.maxDust);
             }
         }

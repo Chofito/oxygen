@@ -1,6 +1,6 @@
 using System;
-using System.Collections.Concurrent;
 using System.Reflection;
+using System.Threading;
 using MonoMod.RuntimeDetour;
 using Terraria;
 using Terraria.ModLoader;
@@ -22,15 +22,19 @@ namespace Oxygen.Utilities
     ///
     /// Solution:
     ///   Intercept both Lighting.AddLight overloads. While Enabled (the parallel work
-    ///   window is open), queue each call as an Action instead of executing it.
+    ///   window is open), store each call's arguments as a ValueTuple in a typed
+    ///   ConcurrentBag — zero heap allocation per call, no closures.
     ///   When Disable() is called (back on the main thread, after all workers have
-    ///   completed), drain the queue sequentially on the main thread.
+    ///   completed), drain both queues sequentially on the main thread.
     ///
     /// Thread safety:
-    ///   - ConcurrentBag supports concurrent Add from multiple worker threads.
+    ///   - Pre-allocated arrays + Interlocked.Increment: O(1) Add, zero allocation.
     ///   - _enabled is volatile — worker threads always see the latest value.
-    ///   - Drain happens only after OxygenParallel.For's CountdownEvent sync,
-    ///     so there are no concurrent writers during the foreach/Clear sequence.
+    ///   - Drain happens only after OxygenParallel.For's CountdownEvent sync, so
+    ///     all worker writes are complete and visible before the main thread reads them
+    ///     (CountdownEvent.Wait() establishes the required happens-before relationship).
+    ///   - _buf*Count is reset on the main thread in Enable(), before any workers start,
+    ///     so there are no concurrent writers during the reset.
     ///
     /// Interaction with LightingOptimizationSystem:
     ///   The ILHook on AddLight(int,int,float,float,float) from LightingOptimizationSystem
@@ -40,15 +44,28 @@ namespace Oxygen.Utilities
     ///   our interceptor falls through to orig) and the viewport check still runs —
     ///   off-screen lights queued by workers are correctly discarded at drain time.
     ///
-    /// Inspired by Nitrate mod's ThreadUnsafeCallWatchdog (TeamCatalyst/Nitrate).
-    /// Key improvements: reflection-based hooks (no HookGen events) and explicit
-    /// commentary on interaction with LightingOptimizationSystem.
+    /// Uses reflection-based hooks (no HookGen dependency) and documents
+    /// the interaction with LightingOptimizationSystem explicitly.
     /// </summary>
     public static class ThreadUnsafeCallWatchdog
     {
-        // ConcurrentBag: O(1) concurrent Add, safe for parallel producers.
-        // Drain is sequential on main thread after Enable=false, so no races.
-        private static readonly ConcurrentBag<Action> _queue = new();
+        // Pre-allocated ring buffers — one per Lighting.AddLight overload.
+        // Each worker atomically claims an index with Interlocked.Increment and writes its
+        // struct directly. Zero heap allocation per call; no lock; O(1) Add.
+        // MaxQueueSize = 16384: upper bound for any realistic boss fight
+        // (6000 max dust × 2 overloads leaves room to spare).
+        private const int MaxQueueSize = 16384;
+
+        private static readonly (int i, int j, int torchId, float lightAmount)[] _buf1 =
+            new (int, int, int, float)[MaxQueueSize];
+        private static readonly (int i, int j, float r, float g, float b)[] _buf2 =
+            new (int, int, float, float, float)[MaxQueueSize];
+
+        // Atomic counters. Each worker does Interlocked.Increment to claim a unique slot.
+        // Reset to 0 in Enable() before any workers start — safe because Enable() runs
+        // on the main thread, before OxygenParallel.For dispatches workers.
+        private static int _buf1Count;
+        private static int _buf2Count;
 
         // Volatile ensures worker threads always read the freshest value without a lock.
         private static volatile bool _enabled;
@@ -144,7 +161,11 @@ namespace Oxygen.Utilities
         /// </summary>
         public static void Enable()
         {
-            _queue.Clear();
+            // Reset counters before workers start. The subsequent volatile write
+            // (_enabled = true) provides a release fence that makes the resets
+            // visible to any worker that does an acquire read of _enabled.
+            _buf1Count = 0;
+            _buf2Count = 0;
             _enabled = true;
         }
 
@@ -155,28 +176,45 @@ namespace Oxygen.Utilities
         /// </summary>
         public static void Disable()
         {
-            // Set false BEFORE draining: re-entrant calls during drain skip the queue.
+            // Set false BEFORE draining: re-entrant calls during drain fall through to orig.
             _enabled = false;
 
-            foreach (var action in _queue)
-                action();
+            // CountdownEvent.Wait() (inside OxygenParallel.For) established a happens-before
+            // relationship, so all worker writes to _buf1/_buf2/_buf*Count are visible here.
+            int count1 = _buf1Count;
+            for (int k = 0; k < count1; k++)
+            {
+                var (i, j, torchId, lightAmount) = _buf1[k];
+                Lighting.AddLight(i, j, torchId, lightAmount);
+            }
 
-            _queue.Clear();
+            int count2 = _buf2Count;
+            for (int k = 0; k < count2; k++)
+            {
+                var (i, j, r, g, b) = _buf2[k];
+                Lighting.AddLight(i, j, r, g, b);
+            }
         }
 
         // ── Interceptors ──────────────────────────────────────────────────────────
 
         // MonoMod Hook convention: orig is the first parameter, then the original params.
-        // When _enabled: queue a closure that captures all parameters and calls Lighting.AddLight
-        // directly (which goes through the hook chain again with _enabled=false, then reaches orig).
-        // When !_enabled: fall through to orig immediately.
+        // When _enabled: atomically claim a slot in the pre-allocated buffer and write
+        //   the struct (zero allocation, no lock, O(1)).
+        // When !_enabled: fall through to orig immediately (main thread or drain path).
+        // Drain calls Lighting.AddLight() directly with _enabled=false, which falls through.
 
         private static void Intercept_int_int_int_float(
             Action<int, int, int, float> orig,
             int i, int j, int torchId, float lightAmount)
         {
             if (_enabled)
-                _queue.Add(() => Lighting.AddLight(i, j, torchId, lightAmount));
+            {
+                int idx = Interlocked.Increment(ref _buf1Count) - 1;
+                if ((uint)idx < MaxQueueSize) // unsigned comparison handles idx < 0 edge case
+                    _buf1[idx] = (i, j, torchId, lightAmount);
+                // else: buffer full — discard silently (cosmetic light, imperceptible)
+            }
             else
                 orig(i, j, torchId, lightAmount);
         }
@@ -186,7 +224,11 @@ namespace Oxygen.Utilities
             int i, int j, float r, float g, float b)
         {
             if (_enabled)
-                _queue.Add(() => Lighting.AddLight(i, j, r, g, b));
+            {
+                int idx = Interlocked.Increment(ref _buf2Count) - 1;
+                if ((uint)idx < MaxQueueSize)
+                    _buf2[idx] = (i, j, r, g, b);
+            }
             else
                 orig(i, j, r, g, b);
         }

@@ -20,9 +20,15 @@ namespace Oxygen.Systems
     ///   for-loop with a two-tier update:
     ///
     ///   ┌─ Tier 1 - Parallel (safe tier) ──────────────────────────────────┐
-    ///   │  Condition: projectile.damage ≤ 0 AND !hostile AND !friendly     │
-    ///   │  These are purely visual projectiles (aura effects, cosmic bursts │
-    ///   │  around Infernum boss segments, particle trails).                 │
+    ///   │  Condition: damage ≤ 0 AND !hostile AND !friendly                │
+    ///   │             AND ModProjectile == null (vanilla only)             │
+    ///   │                                                                   │
+    ///   │  Vanilla-only restriction: mod projectile AI cannot be audited   │
+    ///   │  for thread safety. Even damage=0 mod projectiles may call       │
+    ///   │  SoundEngine, spawn dust, or read/write player state in ways     │
+    ///   │  that race with the main thread. Vanilla projectile AI is stable │
+    ///   │  and their update paths are well-understood.                     │
+    ///   │                                                                   │
     ///   │  Thread-safe because:                                             │
     ///   │    • damage=0 → NPC damage check is a no-op, no NPC state write  │
     ///   │    • !hostile → no player health modification                     │
@@ -225,7 +231,12 @@ namespace Oxygen.Systems
                 Projectile p = Main.projectile[i];
                 if (!p.active) continue;
 
-                if (p.damage <= 0 && !p.hostile && !p.friendly)
+                // Safe tier: vanilla projectiles only (no ModProjectile).
+                // Mod projectiles are excluded regardless of damage=0, because their AI
+                // may call SoundEngine, access player state, or spawn dust in ways we
+                // cannot audit without reading every mod's source. Vanilla projectiles
+                // are well-tested and their AI is deterministic and thread-safe.
+                if (p.damage <= 0 && !p.hostile && !p.friendly && p.ModProjectile == null)
                     _safeSlots[safeCount++] = i;
                 else
                     _unsafeSlots[unsafeCount++] = i;

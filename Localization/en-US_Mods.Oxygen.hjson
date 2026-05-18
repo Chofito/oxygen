@@ -16,6 +16,7 @@ Configs: {
 			Diagnostics: Diagnostics Header
 			Parallelism: Parallelism Header
 			Lighting: Lighting Header
+			Misc: Misc Header
 		}
 
 		DustUpdateThrottling: {
@@ -126,6 +127,16 @@ Configs: {
 		LightingOptimizationEnabled: {
 			Label: Lighting Optimization
 			Tooltip: Skips off-screen Lighting.AddLight() calls, reducing lighting background thread work. Uses a 40-tile margin so light from partially-visible entities is never clipped. Pure visual optimization - no gameplay effect.
+		}
+
+		NewLaserRulerRenderingEnabled: {
+			Tooltip: Replaces the vanilla laser ruler renderer (~14 000 draw calls) with an optimized version that uses ~200 draw calls instead. Only active while the laser ruler accessory is equipped and visible. Visual result is identical to vanilla.
+			Label: Optimized Laser Ruler Rendering
+		}
+
+		FasterPylonEnabled: {
+			Tooltip: Replaces the vanilla pylon-proximity scan with a direct O(pylons) check. Eliminates an area-scan that runs on every pylon teleport attempt. Fully compatible with all mods — Calamity has no hooks on the pylon system.
+			Label: Faster Pylon Proximity Check
 		}
 	}
 

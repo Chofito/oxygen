@@ -2,17 +2,13 @@ using Terraria;
 using Terraria.ID;
 using Terraria.ModLoader;
 using Oxygen.Config;
+using Oxygen.Systems;
 
 namespace Oxygen.GlobalHooks
 {
     // Companion ModSystem handles initialization that GlobalNPC can't do directly
     public class GlobalNPCHooksSystem : ModSystem
     {
-        public override void OnModLoad()
-        {
-            GlobalNPCHooks.InfernumActive = ModLoader.HasMod("InfernumMode");
-        }
-
         public override void OnWorldLoad()
         {
             System.Array.Clear(GlobalNPCHooks.LastTargetedLocalPlayer, 0, GlobalNPCHooks.LastTargetedLocalPlayer.Length);
@@ -22,7 +18,6 @@ namespace Oxygen.GlobalHooks
     public class GlobalNPCHooks : GlobalNPC
     {
         internal static readonly int[] LastTargetedLocalPlayer = new int[201];
-        internal static bool InfernumActive;
 
         public override bool PreAI(NPC npc)
         {
@@ -90,10 +85,17 @@ namespace Oxygen.GlobalHooks
             if (Oxygen.ExemptNPCs.Contains(npc.type))
                 return true;
 
-            // If Infernum is active, be more conservative with the start distance
-            int startDist = InfernumActive
-                ? System.Math.Max(cfg.NPCThrottleStartDistance, 160)
-                : cfg.NPCThrottleStartDistance;
+            // Never throttle hostile NPCs during a boss fight.
+            // Mods (Infernum, Calamity) spawn non-boss helper NPCs to drive phase
+            // transitions and cinematic intro sequences. These NPCs require tick-perfect
+            // AI to advance their state machines. Throttling them causes the sequence to
+            // stall indefinitely — freezing the player, breaking the camera, and making
+            // UI elements render at wrong positions. Exploration throttling (no boss)
+            // is unaffected, which is where the real gain comes from anyway.
+            if (SharedBossState.BossActive)
+                return true;
+
+            int startDist = cfg.NPCThrottleStartDistance;
 
             int slot = npc.whoAmI;
 

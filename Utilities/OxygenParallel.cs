@@ -5,9 +5,7 @@ namespace Oxygen.Utilities
 {
     /// <summary>
     /// Lightweight parallel-for utility using the ThreadPool directly.
-    /// Improvements over Nitrate's FasterParallel:
-    /// - Worker exceptions are captured and re-thrown as AggregateException
-    ///   rather than silently releasing the CountdownEvent.
+    /// - Worker exceptions are captured and re-thrown as AggregateException.
     /// - The last partition always runs on the calling thread to avoid
     ///   an unnecessary ThreadPool dispatch.
     /// </summary>
