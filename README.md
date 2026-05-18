@@ -4,6 +4,13 @@ Pure performance mod, zero gameplay changes. All settings are `ClientSide` and i
 
 ---
 
+## AI Disclosure
+
+Parts of this mod's code and documentation were written with the assistance of Claude (Anthropic). All logic was reviewed, tested, and committed by the author.
+Don't expect expert support for this mod and this mod was created for PERSONAL purpose and published in case someone finds it useful.
+
+---
+
 ## Implemented systems
 
 | File | System | Impact type |
@@ -129,12 +136,6 @@ bool active = (bool)Call("IsFeatureActive", "NPCThrottling");
 //   GoreCulling, SoundThrottling, WorldUpdate, GCManagement,
 //   DustParallelism, ProjParallelism, LightingOpt
 ```
-
----
-
-## AI Disclosure
-
-Parts of this mod's code and documentation were written with the assistance of Claude (Anthropic). All logic was reviewed, tested, and committed by the author.
 
 ---
 
