@@ -81,7 +81,7 @@ Both auto-disable on any runtime error. Require 2 or more logical cores.
 
 | Property | Type | Default | Description |
 |---|---|---|---|
-| `FasterPylonEnabled` | bool | `true` | Enables FasterPylonSystem (O(pylons) proximity check instead of area scan) |
+| `FasterPylonEnabled` | bool | `true` | Enables PylonProximitySystem (O(pylons) proximity check instead of area scan) |
 | `NewLaserRulerRenderingEnabled` | bool | `true` | Enables LaserRulerRenderSystem (~200 draw calls vs ~14000 vanilla) |
 
 ### Diagnostics

@@ -18,8 +18,8 @@ All are client-side; each one self-disables cleanly on load failure.
 | `WorldUpdateSystem.cs` | Reduce UpdateWorld_Inner frequency | ILHook on `WorldGen.UpdateWorld` | CPU |
 | `LightingOptimizationSystem.cs` | Skip off-screen AddLight calls | ILHook on `Lighting.AddLight` | CPU (lighting thread) |
 | `GCPressureManager.cs` | Reduce GC pauses during boss fights | `PostUpdateEverything` (pure C#) | GC pauses |
-| `FasterPylonSystem.cs` | O(pylons) pylon proximity check | Hook on `TeleportPylonsSystem.IsPlayerNearAPylon` | CPU |
-| `LaserRulerRenderSystem.cs` | Optimized laser ruler rendering | ILHook on `Main.DrawInterface_3_LaserRuler` | GPU |
+| `PylonProximitySystem.cs` | Cached-rectangle pylon proximity check | Hook on `TeleportPylonsSystem.IsPlayerNearAPylon` | CPU |
+| `LaserRulerRenderSystem.cs` | Optimized laser ruler rendering | Hook on `Main.DrawInterface_3_LaserRuler` | GPU |
 | `FrameTimeDiagnosticsSystem.cs` | Diagnostics overlay + per-system profiler | `Pre/PostUpdateX` + `PostDrawInterface` | Visual |
 
 ---
@@ -59,27 +59,29 @@ Off-screen dust consumes CPU time in `UpdateDust` but is never rendered. Removin
 
 ```
 OnModLoad:
-  1. CaptureBody    ILHook → saves the original MethodBody of UpdateDust
-  2. PatchFiller    ILHook → injects the cloned body into UpdateDustFiller(int, int)
-  3. PatchLoop      ILHook → replaces the sequential loop with a call to RunParallel()
-  4. ThreadUnsafeCallWatchdog.Install() → defers Lighting.AddLight from workers
+  1. CaptureBody  ILHook → saves the original MethodBody of UpdateDust
+  2. PatchFiller  ILHook → clones body into UpdateDustFiller(int, int) with adjustable bounds
+  3. PatchLoop    ILHook → replaces the sequential loop with a call to RunParallel()
+  4. OxygenParallel.Initialize() → spawns persistent worker threads
 
 Frame N:
   Dust.UpdateDust() → RunParallel()
-      → Watchdog.Enable()
       → OxygenParallel.For(0, maxDust, UpdateDustFiller)
-          ├── Worker 0: UpdateDustFiller(0,    N/4)
-          ├── Worker 1: UpdateDustFiller(N/4,  N/2)
-          ├── Worker 2: UpdateDustFiller(N/2,  3N/4)
-          └── Main   : UpdateDustFiller(3N/4, N)   ← no dispatch overhead
-      → Watchdog.Disable()  ← drains queued Lighting.AddLight on main thread
+          ├── Worker 0: OxygenWorker.Active=true → UpdateDustFiller(0,    N/4)
+          ├── Worker 1: OxygenWorker.Active=true → UpdateDustFiller(N/4,  N/2)
+          ├── ...
+          └── Main   : UpdateDustFiller(last partition)   ← no dispatch overhead
 ```
 
+All slots — vanilla and ModDust — are parallelized. The known thread-unsafe calls are covered:
+
+- `Lighting.AddLight` → `OxygenWorker.Active` flag causes `LightingOptimizationSystem` to drop these calls from worker threads (cosmetically acceptable, one frame)
+- `SoundEngine.PlaySound` → `SoundThrottlingSystem` uses a lock internally, thread-safe
+
 ### Safety properties
-- Worker exceptions are caught and re-thrown as `AggregateException`. On any runtime error, `_parallelEnabled = false` and the rest of the session runs sequentially.
-- If hook installation fails (e.g. tModLoader changed the IL structure), the feature disables without crashing.
+- Worker exceptions are re-thrown as `AggregateException`. On any runtime error, `_parallelEnabled = false` and the session continues sequentially.
+- If hook installation fails, the feature disables without crashing.
 - Requires `ProcessorCount >= 2`.
-- `ThreadUnsafeCallWatchdog` handles `Lighting.AddLight()` calls that ModDust classes may make from worker threads. See `Utilities/README.md`.
 
 ### Relevant config
 | Key | Default | Description |
@@ -189,20 +191,17 @@ Ambient effects (grass growth, biome spread) are imperceptible at 30 Hz.
 **Hook:** `ILHook` on `Lighting.AddLight(int tileX, int tileY, float r, float g, float b)`.
 
 ### What it does
-Injects an early-return guard at the very start of `AddLight`:
-```csharp
-if (IsOutsideViewport(tileX, tileY)) return;
-```
-Uses the existing `ret` at the end of the method as the jump target - no new instructions added.
+Two hooks on `Lighting.AddLight`:
+
+1. **RGB overload** (`ILHook`): injects an early-return at the start — `if (ShouldSkip(x, y)) return;`. `ShouldSkip` returns true if `OxygenWorker.Active` (call from a parallel dust worker) or if the tile is outside the viewport + 40-tile margin.
+
+2. **Torch overload** (`Hook`): drops the call entirely when `OxygenWorker.Active`. The torch overload would otherwise call the RGB overload, but the Hook intercepts it one level higher for simplicity.
 
 ### Why it helps
-During a boss fight with many NPCs and projectiles, hundreds of `AddLight` calls fire per tick, many for entities far off-screen. Each call queues work on the lighting background thread. Culling off-screen calls reduces that queue, letting the thread finish sooner and reducing the CPU sync cost at the start of the next frame.
+During a boss fight with many NPCs and projectiles, hundreds of `AddLight` calls fire per tick, many for entities far off-screen. Culling off-screen and worker-thread calls reduces the lighting background thread's queue, letting it finish sooner and reducing CPU sync cost at the start of the next frame.
 
-### Viewport margin
-40 tiles (~640 px) - generous enough to cover large NPC sprites and light spread reaching the screen edge.
-
-### Interaction with ThreadUnsafeCallWatchdog
-The Watchdog adds a Hook on the same method. When workers call `AddLight`, the Watchdog queues the call. When the queue is drained on the main thread, the call goes through this ILHook's viewport check again - off-screen lights are correctly discarded at drain time.
+### Worker safety
+`OxygenWorker.Active` is a `[ThreadStatic] bool`. It is true only on persistent worker threads while they execute a dust slice. The main thread never sets it, so main-thread `AddLight` calls are never dropped.
 
 ### Relevant config
 | Key | Default | Description |
@@ -243,23 +242,16 @@ The original GC mode is restored in `OnWorldUnload`, `OnModUnload`, and when the
 
 ---
 
-## FasterPylonSystem
+## PylonProximitySystem
 
-**File:** `FasterPylonSystem.cs`
+**File:** `PylonProximitySystem.cs`
 **Hook:** `Hook` on `TeleportPylonsSystem.IsPlayerNearAPylon(Player)`.
 
 ### What it does
-Replaces the vanilla pylon proximity check with a direct iteration over `Main.PylonSystem.Pylons`.
+Replaces the vanilla pylon proximity check with a direct loop over `Main.PylonSystem.Pylons`.
 
-Vanilla: scans an area around the player → O(reach_area).
-Optimized: iterates the pylon list directly → O(pylons), typically O(1) for any normal world.
-
-### Implementation
-For each pylon entry, computes the exact reach bounds using `TileReachCheckSettings.Pylons.GetRanges()` (the same method vanilla uses internally) and returns `true` on first match.
-
-### Notes
-- Only active on teleport attempts, not every frame.
-- Uses `Hook` with reflection instead of HookGen events for build stability.
+Vanilla: scans a tile area around the player proportional to the reach radius squared → O(reach_area).
+Optimized: `GetRanges()` and the player tile position are computed once before the loop; the inner body is pure integer comparisons × pylon count → O(pylons), effectively O(1) for any real world (0–10 pylons).
 
 ### Relevant config
 | Key | Default | Description |
@@ -271,7 +263,7 @@ For each pylon entry, computes the exact reach bounds using `TileReachCheckSetti
 ## LaserRulerRenderSystem
 
 **File:** `LaserRulerRenderSystem.cs`
-**Hook:** `ILHook` on `Main.DrawInterface_3_LaserRuler()` (private instance method, reflection).
+**Hook:** `Hook` on `Main.DrawInterface_3_LaserRuler()` (private instance method, reflection).
 
 ### What it does
 Replaces the vanilla laser ruler renderer with one that draws ~200 shapes instead of ~14 000 individual tile calls.
@@ -284,11 +276,11 @@ Optimized:
 4. Three draws for the mouse-tile red cross highlight.
 Total at 1080p: ~200 draw calls.
 
-### IL strategy
-Navigates past the two entrance guards of `DrawInterface_3_LaserRuler` (equipped check, opacity check), then injects a delegate. The delegate draws the optimized ruler and returns `true` to skip the vanilla loop. If it returns `false` (or throws), vanilla code runs as fallback.
+### Hook strategy
+Full method replacement via `Hook` (no IL navigation). The hook checks `Main.LocalPlayer.rulerLine`; if false it calls `orig` immediately. If rendering throws for any reason, `DrawOptimized` returns `false` and `orig` runs as fallback. No brfalse navigation required.
 
 ### Notes
-- Only active when the laser ruler accessory is equipped and visible.
+- Only active when the laser ruler accessory is equipped.
 - No interaction with content mods.
 - Uses `Main.ReverseGravitySupport` to handle reversed gravity correctly.
 

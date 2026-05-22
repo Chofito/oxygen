@@ -9,6 +9,12 @@ namespace Oxygen.GlobalHooks
     // Companion ModSystem handles initialization that GlobalNPC can't do directly
     public class GlobalNPCHooksSystem : ModSystem
     {
+        public override void OnModLoad()
+        {
+            GlobalNPCHooks.CacheConfig();
+            GlobalProjectileHooks.CacheConfig();
+        }
+
         public override void OnWorldLoad()
         {
             System.Array.Clear(GlobalNPCHooks.LastTargetedLocalPlayer, 0, GlobalNPCHooks.LastTargetedLocalPlayer.Length);
@@ -19,9 +25,14 @@ namespace Oxygen.GlobalHooks
     {
         internal static readonly int[] LastTargetedLocalPlayer = new int[201];
 
+        // Cached once at load — config is a singleton that never changes during a session.
+        // Avoids a dictionary lookup on every PreAI call (up to 200 NPCs per frame).
+        internal static ClientConfig? Cfg;
+        internal static void CacheConfig() => Cfg = ModContent.GetInstance<ClientConfig>();
+
         public override bool PreAI(NPC npc)
         {
-            var cfg = ModContent.GetInstance<ClientConfig>();
+            var cfg = Cfg;
             if (cfg == null)
                 return true;
 

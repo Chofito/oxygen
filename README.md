@@ -26,13 +26,13 @@ Don't expect expert support for this mod and this mod was created for PERSONAL p
 | `Systems/WorldUpdateSystem.cs` | Halve UpdateWorld_Inner rate during bosses (SP only) | CPU |
 | `Systems/GCPressureManager.cs` | SustainedLowLatency GC during boss fights | GC pauses |
 | `Systems/ProjectileParallelismSystem.cs` | Parallelize visual projectiles (damage=0) via ILHook | CPU multi-core |
-| `Systems/FasterPylonSystem.cs` | O(pylons) pylon proximity check | CPU |
+| `Systems/PylonProximitySystem.cs` | O(pylons) pylon proximity check | CPU |
 | `Systems/LaserRulerRenderSystem.cs` | Laser ruler ~200 draw calls vs ~14 000 vanilla | GPU |
 | `GlobalHooks/GlobalNPCHooks.cs` | Throttle AI of distant NPCs | CPU |
 | `GlobalHooks/GlobalProjectileHooks.cs` | Cull + hide ally projectiles | CPU/GPU |
-| `Utilities/OxygenParallel.cs` | ThreadPool parallel-for with exception propagation | |
+| `Utilities/OxygenParallel.cs` | Persistent worker thread pool with exception propagation | |
+| `Utilities/OxygenWorker.cs` | [ThreadStatic] flag marking worker-thread execution | |
 | `Utilities/ILMethodBodyCloner.cs` | Clone a method's IL body into an ILCursor | |
-| `Utilities/ThreadUnsafeCallWatchdog.cs` | Defer Lighting.AddLight() from workers to main thread | |
 | `Oxygen.cs` | Public ModCall API | |
 
 ---
@@ -41,25 +41,24 @@ Don't expect expert support for this mod and this mod was created for PERSONAL p
 
 ```
 Game loop
-├── PreUpdatePlayers()             → FrameTimeDiagnosticsSystem   (start update timer)
-├── PreUpdateDusts()               → DustOptimizationSystem        (cull off-screen dust)
-├── Dust.UpdateDust() [ILHook]     → DustParallelismSystem         (parallelize loop)
-│                                  → ThreadUnsafeCallWatchdog      (defer AddLight from workers)
-├── PreUpdateGores()               → GoreCullingSystem             (timeout off-screen gore)
-├── GlobalNPC.PreAI()              → GlobalNPCHooks                (skip AI for distant NPCs)
-├── Main.PreUpdateAllProjectiles() → ProjectileParallelismSystem   (ILHook - safe/unsafe split)
-├── GlobalProjectile.PreAI()       → GlobalProjectileHooks         (throttle off-screen visual projectiles)
-├── GlobalProjectile.PreDraw()     → GlobalProjectileHooks         (cull + hide allies)
-├── WorldGen.UpdateWorld() [ILHook]→ WorldUpdateSystem             (conditional skip UpdateWorld_Inner)
-├── SoundEngine.PlaySound() [ILHook]→ SoundThrottlingSystem        (rolling window throttle)
-├── Lighting.AddLight() [ILHook]   → LightingOptimizationSystem    (skip off-screen)
-│                      [Hook]      → ThreadUnsafeCallWatchdog      (queue if in parallel window)
-├── PostUpdateNPCs()               → SharedBossState               (update BossActive, ActiveNPCCount)
-├── PostUpdateEverything()         → SharedBossState               (update Proj/Dust counts)
-│                                  → GCPressureManager             (change GC mode)
-│                                  → FrameTimeDiagnosticsSystem    (stop update timer)
-├── PostDrawTiles()                → FrameTimeDiagnosticsSystem    (stop tile timer)
-└── PostDrawInterface()            → FrameTimeDiagnosticsSystem    (draw overlay)
+├── PreUpdatePlayers()              → FrameTimeDiagnosticsSystem   (start update timer)
+├── PreUpdateDusts()                → DustOptimizationSystem        (cull off-screen dust)
+├── Dust.UpdateDust() [ILHook]      → DustParallelismSystem         (parallelize loop, OxygenWorker.Active set on workers)
+├── PreUpdateGores()                → GoreCullingSystem             (timeout off-screen gore)
+├── GlobalNPC.PreAI()               → GlobalNPCHooks                (skip AI for distant NPCs)
+├── Main.PreUpdateAllProjectiles()  → ProjectileParallelismSystem   (ILHook - safe/unsafe split)
+├── GlobalProjectile.PreAI()        → GlobalProjectileHooks         (throttle off-screen visual projectiles)
+├── GlobalProjectile.PreDraw()      → GlobalProjectileHooks         (cull + hide allies)
+├── WorldGen.UpdateWorld() [ILHook] → WorldUpdateSystem             (conditional skip UpdateWorld_Inner)
+├── SoundEngine.PlaySound() [ILHook]→ SoundThrottlingSystem         (rolling window throttle)
+├── Lighting.AddLight() [ILHook]    → LightingOptimizationSystem    (skip off-screen + drop from workers)
+│                      [Hook]       → LightingOptimizationSystem    (torch overload — drop when worker)
+├── PostUpdateNPCs()                → SharedBossState               (update BossActive, ActiveNPCCount)
+├── PostUpdateEverything()          → SharedBossState               (update Proj/Dust counts)
+│                                   → GCPressureManager             (change GC mode)
+│                                   → FrameTimeDiagnosticsSystem    (stop update timer)
+├── PostDrawTiles()                 → FrameTimeDiagnosticsSystem    (stop tile timer)
+└── PostDrawInterface()             → FrameTimeDiagnosticsSystem    (draw overlay)
 ```
 
 ---
@@ -79,7 +78,7 @@ Game loop
 | WorldUpdateThrottling | ✅ | ❌ disabled (SP only) | ❌ disabled |
 | GCPressure | ✅ | ✅ | ✅ (default off) |
 | LightingOpt | ✅ | ✅ local | N/A |
-| FasterPylon | ✅ | ✅ | ✅ |
+| PylonProximity | ✅ | ✅ | ✅ |
 | LaserRuler | ✅ | ✅ | N/A |
 
 ---
@@ -141,8 +140,8 @@ bool active = (bool)Call("IsFeatureActive", "NPCThrottling");
 
 ## Thread safety notes
 
-`DustParallelismSystem` runs dust updates on worker threads. To prevent crashes from thread-unsafe API calls made by third-party ModDust classes during worker execution:
+`DustParallelismSystem` and `ProjectileParallelismSystem` run updates on persistent worker threads. Known thread-unsafe call sites are handled per API:
 
-- `ThreadUnsafeCallWatchdog` intercepts `Lighting.AddLight()` overloads. While the parallel window is open, calls are queued in a `ConcurrentBag<Action>` and drained on the main thread after all workers complete.
-- `SoundThrottlingSystem` protects its dictionary with `lock(_lock)` so sound throttle checks from workers are safe.
+- `Lighting.AddLight()` — `LightingOptimizationSystem` checks `OxygenWorker.Active` (a `[ThreadStatic] bool`) and drops the call from workers entirely. One frame of missing dust-emitted light is cosmetically invisible.
+- `SoundEngine.PlaySound()` — `SoundThrottlingSystem` protects its dictionary with `lock(_lock)`, safe from any thread.
 - `OxygenParallel` propagates worker exceptions via `AggregateException`. On any error, the parallel path auto-disables for the session and falls back to sequential.

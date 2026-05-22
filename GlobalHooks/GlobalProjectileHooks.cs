@@ -9,6 +9,11 @@ namespace Oxygen.GlobalHooks
 {
     public class GlobalProjectileHooks : GlobalProjectile
     {
+        // Cached once at load — avoids a dictionary lookup on every PreAI/PreDraw call
+        // (up to 1000 projectiles per frame across both hooks).
+        private static ClientConfig? Cfg;
+        internal static void CacheConfig() => Cfg = ModContent.GetInstance<ClientConfig>();
+
         // ── PreAI - throttle off-screen visual projectiles ────────────────────
 
         /// <summary>
@@ -22,7 +27,7 @@ namespace Oxygen.GlobalHooks
         /// </summary>
         public override bool PreAI(Projectile projectile)
         {
-            var cfg = ModContent.GetInstance<ClientConfig>();
+            var cfg = Cfg;
             if (cfg == null || !cfg.ProjectileAIThrottlingEnabled)
                 return true;
 
@@ -65,7 +70,7 @@ namespace Oxygen.GlobalHooks
 
         public override bool PreDraw(Projectile projectile, ref Color lightColor)
         {
-            var cfg = ModContent.GetInstance<ClientConfig>();
+            var cfg = Cfg;
             if (cfg == null)
                 return true;
 
