@@ -1,59 +1,64 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Mono.Cecil.Cil;
 using MonoMod.Cil;
-using MonoMod.Utils;
 
 namespace Oxygen.Utilities
 {
     internal static class ILMethodBodyCloner
     {
+        // Clones the instruction body of `source` into `cursor`, adjusting all
+        // branch targets and exception handler boundaries to point to the new copies.
+        // Debug sequence points and custom debug info are intentionally not cloned —
+        // the target method is a generated stub, not a user-facing call site.
         public static void CloneBodyToCursor(MethodBody source, ILCursor cursor)
         {
             cursor.Index = 0;
             cursor.Body.MaxStackSize = source.MaxStackSize;
-            cursor.Body.InitLocals    = source.InitLocals;
+            cursor.Body.InitLocals   = source.InitLocals;
             cursor.Body.LocalVarToken = source.LocalVarToken;
 
-            // 1. Emit a clone of every instruction (operands may still point to old instructions).
+            // Emit a copy of every instruction. Operands that reference other
+            // instructions in the source body are still pointing at those source
+            // instructions — we'll fix them in the remap step below.
             foreach (var instr in source.Instructions)
                 cursor.Emit(instr.OpCode, instr.Operand);
 
-            // 2. Preserve original offsets so IndexOf-based lookups work correctly.
+            // Preserve the original IL offsets so offset-based lookups (e.g. from
+            // exception handler range checks) continue to work correctly.
             for (int i = 0; i < source.Instructions.Count; i++)
                 cursor.Instrs[i].Offset = source.Instructions[i].Offset;
 
-            // 3. Remap instruction-type operands (branch targets, switch tables) to their
-            //    cloned counterparts.
+            // Build a O(1) map: source instruction → its clone in the destination body.
+            var map = BuildInstructionMap(source, cursor);
+
+            // Remap all instruction-type operands (branch targets, switch tables).
             foreach (var instr in cursor.Body.Instructions)
             {
                 instr.Operand = instr.Operand switch
                 {
-                    Instruction target =>
-                        Resolve(target, source, cursor),
-
-                    Instruction[] targets =>
-                        targets.Select(t => Resolve(t, source, cursor)).ToArray(),
-
-                    _ => instr.Operand
+                    Instruction target     => map[target],
+                    Instruction[] targets  => Array.ConvertAll(targets, t => map[t]),
+                    _                      => instr.Operand
                 };
             }
 
-            // 4. Clone exception handlers with remapped boundaries.
+            // Clone exception handlers with remapped boundaries.
             cursor.Body.ExceptionHandlers.AddRange(
                 source.ExceptionHandlers.Select(h => new ExceptionHandler(h.HandlerType)
                 {
-                    TryStart     = h.TryStart     is null ? null : Resolve(h.TryStart,     source, cursor),
-                    TryEnd       = h.TryEnd       is null ? null : Resolve(h.TryEnd,       source, cursor),
-                    FilterStart  = h.FilterStart  is null ? null : Resolve(h.FilterStart,  source, cursor),
-                    HandlerStart = h.HandlerStart is null ? null : Resolve(h.HandlerStart, source, cursor),
-                    HandlerEnd   = h.HandlerEnd   is null ? null : Resolve(h.HandlerEnd,   source, cursor),
+                    TryStart     = h.TryStart     is null ? null : map[h.TryStart],
+                    TryEnd       = h.TryEnd       is null ? null : map[h.TryEnd],
+                    FilterStart  = h.FilterStart  is null ? null : map[h.FilterStart],
+                    HandlerStart = h.HandlerStart is null ? null : map[h.HandlerStart],
+                    HandlerEnd   = h.HandlerEnd   is null ? null : map[h.HandlerEnd],
                     CatchType    = h.CatchType    is null ? null
                                    : cursor.Body.Method.Module.ImportReference(h.CatchType),
                 })
             );
 
-            // 5. Clone local variable declarations.
+            // Clone local variable declarations (types only; names are not needed).
             cursor.Body.Variables.AddRange(
                 source.Variables.Select(v => new VariableDefinition(v.VariableType))
             );
@@ -61,13 +66,22 @@ namespace Oxygen.Utilities
             cursor.Index = 0;
         }
 
-        private static Instruction Resolve(Instruction src, MethodBody source, ILCursor dest)
+        private static Dictionary<Instruction, Instruction> BuildInstructionMap(
+            MethodBody source, ILCursor dest)
         {
-            int idx = source.Instructions.IndexOf(src);
-            if (idx < 0)
+            var srcInstrs  = source.Instructions;
+            var destInstrs = dest.Body.Instructions;
+
+            if (srcInstrs.Count != destInstrs.Count)
                 throw new Exception(
-                    $"Could not resolve IL instruction (opcode={src.OpCode.Name}, offset=0x{src.Offset:X4}).");
-            return dest.Body.Instructions[idx];
+                    $"Instruction count mismatch after clone: " +
+                    $"source={srcInstrs.Count}, dest={destInstrs.Count}.");
+
+            var map = new Dictionary<Instruction, Instruction>(srcInstrs.Count);
+            for (int i = 0; i < srcInstrs.Count; i++)
+                map[srcInstrs[i]] = destInstrs[i];
+
+            return map;
         }
     }
 }
